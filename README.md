@@ -7,6 +7,16 @@ cd finalproxy
 git clone --branch 0.4.0 --depth 1 https://github.com/cloudflare/pingora.git
 ```
 
+## Dependency issue fix for sfv crate
+```bash
+# Modify pingora-core's Cargo.toml
+# Before
+sfv = "0"
+
+# After
+sfv = "0.10.4"
+```
+
 ## Routing setup
 ```bash
 sudo useradd --system --no-create-home mitm
