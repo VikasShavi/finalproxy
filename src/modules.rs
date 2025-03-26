@@ -8,6 +8,7 @@ pub struct RequestResponseLogging {
     pub uri: Option<String>,
     pub host: Option<String>,
     pub request_headers: Option<HashMap<String, String>>,
+    pub request_body: String,
     pub response_status: Option<u16>,
     pub response_headers: Option<HashMap<String, String>>,
     pub response_body: String,

@@ -53,6 +53,7 @@ impl ProxyHttp for MITM {
     }
 
     async fn upstream_request_filter(&self, session: &mut Session, upstream_request: &mut RequestHeader, ctx: &mut Self::CTX) -> Result<()> {
+        // logging the request headers
         ctx.method = Some(upstream_request.method.to_string());
         ctx.uri = Some(upstream_request.uri.to_string());
         ctx.host = session.get_header("Host").map(|h| h.to_str().unwrap_or("").to_string());
@@ -65,11 +66,37 @@ impl ProxyHttp for MITM {
             }
         }
         ctx.request_headers = Some(headers);
+
+        // Can add custom headers to send to upstream server
         upstream_request.append_header("x-added-by-proxy", "secret-token")?;
         Ok(())
     }
 
+    async fn request_body_filter(&self, _session: &mut Session, body: &mut Option<Bytes>, end_of_stream: bool, ctx: &mut Self::CTX) -> Result<()> {
+        if let Some(data) = body {
+            if let Ok(body) = str::from_utf8(data) {
+                println!("body: {}", body);
+                ctx.request_body.push_str(body);
+            } else {
+                println!("non ascii body: {:?}", data);
+                ctx.request_body.push_str(&format!("{:?}", data));
+            }
+        }
+
+        if end_of_stream {
+            if let Ok(json) = serde_json::to_string_pretty(ctx) {
+                println!("{}", json);
+                if let Some(sender) = LOGGER.get() {
+                    sender.try_send(json); // non-blocking
+                }
+            }
+            println!("end of request body");
+        }
+        Ok(())
+    }
+
     async fn response_filter(&self, _session: &mut Session, upstream_response: &mut ResponseHeader, ctx: &mut Self::CTX) -> Result<()> {
+        // logging the response headers
         ctx.response_status = Some(upstream_response.status.as_u16());
         let mut headers = HashMap::new();
         for (keys, values) in upstream_response.headers.iter() {
@@ -94,6 +121,7 @@ impl ProxyHttp for MITM {
 
 
     fn upstream_response_body_filter(&self, _session: &mut Session, body: &mut Option<Bytes>, end_of_stream: bool, ctx: &mut Self::CTX) {
+        // logging the request
         if let Some(data) = body {
             let is_gzip = match &ctx.response_headers {
                 Some(headers) => headers.get("content-encoding").map_or(false, |value| value == "gzip"),
@@ -117,7 +145,7 @@ impl ProxyHttp for MITM {
                     sender.try_send(json); // non-blocking
                 }
             }
-            println!("end of body");
+            println!("end of response body");
         }
     }
 }
