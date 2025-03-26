@@ -1,4 +1,4 @@
-mod modules;
+mod models;
 mod fakegencert;
 
 use std::io::Write;
@@ -27,10 +27,10 @@ struct MITM;
 
 #[async_trait]
 impl ProxyHttp for MITM {
-    type CTX = modules::RequestResponseLogging;
+    type CTX = models::RequestResponseLogging;
 
     fn new_ctx(&self) -> Self::CTX {
-        modules::RequestResponseLogging::default()
+        models::RequestResponseLogging::default()
     }
 
     async fn upstream_peer(&self, session: &mut Session, _ctx: &mut Self::CTX) -> Result<Box<HttpPeer>> {

@@ -1,7 +1,7 @@
 use std::{fs, str};
 use openssl::{ rsa::Rsa, bn::BigNum, asn1::Asn1Time };
 use std::time::{SystemTime, UNIX_EPOCH};
-use crate::modules::Certkey;
+use crate::models::Certkey;
 use dashmap::DashMap;
 use once_cell::sync::Lazy;
 use pingora_openssl::{ pkey::PKey, x509::X509, x509::X509NameBuilder, nid::Nid, hash::MessageDigest, x509::extension::SubjectAlternativeName };
@@ -55,7 +55,7 @@ pub fn generate_fake_cert(domain: &str) -> Result<Certkey, String>{
     builder.sign(&ca_key, MessageDigest::sha256()).map_err(|e| format!("Could not sign fake cert: {}", e))?;
     let cert = builder.build();
 
-    println!("ccreated a fake cert for reddit; {:?}", cert);
+    println!("created a fake cert for {}: {:?}", domain, cert);
     // CertKey::new(vec![cert], pkey)
     let res = Certkey {
         cert,
