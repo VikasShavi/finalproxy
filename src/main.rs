@@ -73,6 +73,7 @@ impl ProxyHttp for MITM {
     }
 
     async fn request_body_filter(&self, _session: &mut Session, body: &mut Option<Bytes>, end_of_stream: bool, ctx: &mut Self::CTX) -> Result<()> {
+        // logging the request body
         if let Some(data) = body {
             if let Ok(body) = str::from_utf8(data) {
                 println!("body: {}", body);
@@ -121,7 +122,7 @@ impl ProxyHttp for MITM {
 
 
     fn upstream_response_body_filter(&self, _session: &mut Session, body: &mut Option<Bytes>, end_of_stream: bool, ctx: &mut Self::CTX) {
-        // logging the request
+        // logging the response body
         if let Some(data) = body {
             let is_gzip = match &ctx.response_headers {
                 Some(headers) => headers.get("content-encoding").map_or(false, |value| value == "gzip"),

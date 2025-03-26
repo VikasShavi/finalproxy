@@ -29,3 +29,44 @@ sudo -u mitm target/release/server
 openssl genrsa -out rootCA.key 2048
 openssl req -x509 -new -nodes -key rootCA.key -sha256 -days 365 -out rootCA.pem
 ```
+
+## Example output of log files
+```json
+{
+  "client_ip": "192.168.1.25:53752",
+  "method": "POST",
+  "uri": "/submit",
+  "host": "hello.com",
+  "request_headers": {
+    "upgrade-insecure-requests": "1",
+    "accept-language": "en-US,en;q=0.5",
+    "sec-fetch-mode": "navigate",
+    "origin": "https://hello.com",
+    "accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+    "accept-encoding": "gzip, deflate, br",
+    "user-agent": "Mozilla/5.0 (X11; Linux aarch64; rv:109.0) Gecko/20100101 Firefox/115.0",
+    "sec-fetch-user": "?1",
+    "host": "hello.com",
+    "connection": "keep-alive",
+    "sec-fetch-site": "same-origin",
+    "content-type": "application/x-www-form-urlencoded",
+    "sec-fetch-dest": "document",
+    "cookie": "_ga=GA1.2.2035304928.1743002572; _gid=GA1.2.599558051.1743002572; _gat=1; _gali=main",
+    "content-length": "16",
+    "referer": "https://hello.com/"
+  },
+  "request_body": "e=v%40v.com&l=en",
+  "response_status": 200,
+  "response_headers": {
+    "x-cloud-trace-context": "7ac9a9855de096bbfacbdfb5713a176c",
+    "vary": "Accept-Encoding",
+    "date": "Wed, 26 Mar 2025 15:23:01 GMT",
+    "transfer-encoding": "chunked",
+    "content-encoding": "gzip",
+    "server": "Google Frontend",
+    "content-type": "text/html; charset=utf-8",
+    "cache-control": "no-cache"
+  },
+  "response_body": "GZIP compressed body"
+}
+```
