@@ -4,7 +4,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use crate::models::Certkey;
 use dashmap::DashMap;
 use once_cell::sync::Lazy;
-use pingora_openssl::{ pkey::PKey, x509::X509, x509::X509NameBuilder, nid::Nid, hash::MessageDigest, x509::extension::SubjectAlternativeName };
+use pingora_openssl::{ pkey::PKey, pkey::Private, x509::X509, x509::X509NameBuilder, nid::Nid, hash::MessageDigest, x509::extension::SubjectAlternativeName };
 
 fn generate_serial_number() -> u32 {
     let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
@@ -12,13 +12,25 @@ fn generate_serial_number() -> u32 {
 }
 
 static CERT_CACHE: Lazy<DashMap<String, Certkey>> = Lazy::new(DashMap::new);
+static CA_CERT: Lazy<X509> = Lazy::new(|| {
+    let pem = fs::read("keys/rootCA.pem").expect("Failed to read rootCA.pem");
+    X509::from_pem(&pem).expect("Failed to parse root CA cert")
+});
+
+static CA_KEY: Lazy<PKey<Private>> = Lazy::new(|| {
+    let pem = fs::read("keys/rootCA.key").expect("Failed to read rootCA.key");
+    PKey::private_key_from_pem(&pem).expect("Failed to parse root CA key")
+});
 
 pub fn generate_fake_cert(domain: &str) -> Result<Certkey, String>{
-    let ca_cert_pem = fs::read("keys/rootCA.pem").map_err(|e| format!("Could not read rootCA.pem: {}", e))?;
-    let ca_key_pem = fs::read("keys/rootCA.key").map_err(|e| format!("Could not read rootCA.key: {}", e))?;
+    // let ca_cert_pem = fs::read("keys/rootCA.pem").map_err(|e| format!("Could not read rootCA.pem: {}", e))?;
+    // let ca_key_pem = fs::read("keys/rootCA.key").map_err(|e| format!("Could not read rootCA.key: {}", e))?;
+    //
+    // let ca_cert = X509::from_pem(&ca_cert_pem).map_err(|e| format!("Could not parse CA cert: {}", e))?;
+    // let ca_key = PKey::private_key_from_pem(&ca_key_pem).map_err(|e| format!("Could not parse CA key: {}", e))?;
 
-    let ca_cert = X509::from_pem(&ca_cert_pem).map_err(|e| format!("Could not parse CA cert: {}", e))?;
-    let ca_key = PKey::private_key_from_pem(&ca_key_pem).map_err(|e| format!("Could not parse CA key: {}", e))?;
+    let ca_cert = CA_CERT.as_ref();
+    let ca_key = CA_KEY.as_ref();
 
     if let Some(cached_cert) = CERT_CACHE.get(domain) {
         return Ok(cached_cert.clone());

@@ -45,41 +45,56 @@ sudo -u mitm target/release/server
 #### Http Log
 ```json
 {
-  "client_ip": "192.168.1.25:53752",
-  "method": "POST",
-  "uri": "/submit",
-  "host": "hello.com",
+  "log_type": "Http",
+  "is_websocket": false,
+  "websocket_upgrade_completed": false,
+  "deflating": false,
+  "timestamp": "Sat, 29 Mar 2025 18:12:24 GMT",
+  "client_ip": "127.0.0.1:50559",
+  "method": "GET",
+  "uri": "/keys/",
+  "upstream_server": "test.com:7189",
   "request_headers": {
-    "upgrade-insecure-requests": "1",
-    "accept-language": "en-US,en;q=0.5",
-    "sec-fetch-mode": "navigate",
-    "origin": "https://hello.com",
-    "accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
-    "accept-encoding": "gzip, deflate, br",
-    "user-agent": "Mozilla/5.0 (X11; Linux aarch64; rv:109.0) Gecko/20100101 Firefox/115.0",
-    "sec-fetch-user": "?1",
-    "host": "hello.com",
-    "connection": "keep-alive",
-    "sec-fetch-site": "same-origin",
-    "content-type": "application/x-www-form-urlencoded",
-    "sec-fetch-dest": "document",
-    "cookie": "_ga=GA1.2.2035304928.1743002572; _gid=GA1.2.599558051.1743002572; _gat=1; _gali=main",
-    "content-length": "16",
-    "referer": "https://hello.com/"
+    "user-agent": "curl/8.7.1",
+    "host": "test.com:7189",
+    "accept": "*/*"
   },
-  "request_body": "e=v%40v.com&l=en",
   "response_status": 200,
   "response_headers": {
-    "x-cloud-trace-context": "7ac9a9855de096bbfacbdfb5713a176c",
-    "vary": "Accept-Encoding",
-    "date": "Wed, 26 Mar 2025 15:23:01 GMT",
-    "transfer-encoding": "chunked",
-    "content-encoding": "gzip",
-    "server": "Google Frontend",
+    "content-length": "277",
+    "date": "Sat, 29 Mar 2025 18:12:24 GMT",
     "content-type": "text/html; charset=utf-8",
-    "cache-control": "no-cache"
+    "server": "SimpleHTTP/0.6 Python/3.12.2"
   },
-  "response_body": "GZIP compressed body"
+  "response_body": "<!DOCTYPE HTML>\n<html lang=\"en\">\n<head>\n<meta charset=\"utf-8\">\n<title>Directory listing for /keys/</title>\n</head>\n<body>\n<h1>Directory listing for /keys/</h1>\n<hr>\n<ul>\n<li><a href=\"cert.pem\">cert.pem</a></li>\n<li><a href=\"key.pem\">key.pem</a></li>\n</ul>\n<hr>\n</body>\n</html>\n"
+}
+{
+  "log_type": "Http",
+  "is_websocket": true,
+  "websocket_upgrade_completed": false,
+  "deflating": true,
+  "timestamp": "Sat, 29 Mar 2025 18:12:37 GMT",
+  "client_ip": "127.0.0.1:50561",
+  "method": "GET",
+  "uri": "/",
+  "upstream_server": "127.0.0.1:7189",
+  "request_headers": {
+    "sec-websocket-version": "13",
+    "sec-websocket-extensions": "permessage-deflate; client_max_window_bits",
+    "upgrade": "websocket",
+    "host": "127.0.0.1:7189",
+    "sec-websocket-key": "kXkG+CsKM6ObMbTSoh8l8g==",
+    "connection": "Upgrade"
+  },
+  "response_status": 101,
+  "response_headers": {
+    "sec-websocket-accept": "rz9mBtWYfTHucGYdfNf1LBqVScY=",
+    "date": "Sat, 29 Mar 2025 18:12:37 GMT",
+    "server": "Python/3.12 websockets/13.1",
+    "upgrade": "websocket",
+    "connection": "Upgrade",
+    "sec-websocket-extensions": "permessage-deflate; server_max_window_bits=12; client_max_window_bits=12"
+  }
 }
 ```
 

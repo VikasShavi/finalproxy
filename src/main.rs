@@ -255,7 +255,7 @@ impl ProxyHttp for MITM {
 
 struct MyTlsHandler;
 
-#[async_trait::async_trait]
+#[async_trait]
 impl TlsAccept for MyTlsHandler {
     async fn certificate_callback(&self, ssl: &mut TlsRef) {
         if let Some(sni) = ssl.servername(NameType::HOST_NAME) {
@@ -339,12 +339,14 @@ fn main() {
     let tls_callbacks: TlsAcceptCallbacks = Box::new(my_tls_handler);
 
     let tls_settings = TlsSettings::with_callbacks(tls_callbacks).unwrap();
-    let mut proxy = http_proxy_service(&server.configuration, MITM);
-    proxy.add_tls_with_settings("0.0.0.0:6189", None, tls_settings);
+    let mut proxyhttps = http_proxy_service(&server.configuration, MITM);
+    proxyhttps.add_tls_with_settings("0.0.0.0:6189", None, tls_settings);
 
-    proxy.add_tcp("0.0.0.0:7189");
-    server.add_service(proxy);
+    let mut proxyhttp = http_proxy_service(&server.configuration, MITM);
+    proxyhttp.add_tcp("0.0.0.0:7189");
+    server.add_services(vec![Box::new(proxyhttp), Box::new(proxyhttps)]);
     log::info!("https Proxy listening on 0.0.0.0:6189");
     log::info!("http proxy listening on 0.0.0.0:7189");
+
     server.run_forever();
 }
