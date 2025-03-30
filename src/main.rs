@@ -1,102 +1,117 @@
-mod models;
-mod fakegencert;
+use flate2::Decompress;
 
-use std::io::Write;
-use async_trait::async_trait;
-use bytes::Bytes;
-use std::collections::HashMap;
-use std::str;
-
-use pingora_openssl::ssl::NameType;
 use pingora_proxy::{http_proxy_service, ProxyHttp, Session};
-use pingora_core::{modules::http::HttpModuleBuilder, server::Server, upstreams::peer::Peer, Result};
-use pingora_core::upstreams::peer::{HttpPeer, PeerOptions};
+use pingora_core::upstreams::peer::{ HttpPeer, PeerOptions };
 use pingora_core::listeners::tls::TlsSettings;
 use pingora_core::listeners::TlsAccept;
 use pingora_core::listeners::TlsAcceptCallbacks;
 use pingora_core::protocols::tls::TlsRef;
-use pingora_http::RequestHeader;
-use pingora_http::ResponseHeader;
+use pingora_openssl::ssl::NameType;
+use async_trait::async_trait;
+use pingora_core::server::Server;
+use pingora_core::Result;
+use bytes::Bytes;
+use pingora_http::{ ResponseHeader, RequestHeader };
 
-use once_cell::sync::OnceCell;
-use tokio::{ sync::mpsc::Sender, fs::OpenOptions, io::AsyncWriteExt };
+use std::str;
+use std::collections::HashMap;
+use env_logger;
 
-static LOGGER: OnceCell<Sender<String>> = OnceCell::new();
+mod models;
+use models::RequestResponseLogging;
+use models::WebSocketLog;
+use models::LogEvent;
+use models::HttpLog;
+
+mod stocdecoder;
+use stocdecoder::decode_server_ws_frame;
+
+mod ctosdecoder;
+use ctosdecoder::decode_client_ws_frame;
+
+mod fakegencert;
+use fakegencert::generate_fake_cert;
 
 struct MITM;
 
 #[async_trait]
 impl ProxyHttp for MITM {
-    type CTX = models::RequestResponseLogging;
+    type CTX = RequestResponseLogging;
 
     fn new_ctx(&self) -> Self::CTX {
-        models::RequestResponseLogging::default()
+        RequestResponseLogging::default()
     }
 
     async fn upstream_peer(&self, session: &mut Session, _ctx: &mut Self::CTX) -> Result<Box<HttpPeer>> {
         let conn = session.get_header("Host").unwrap().to_str().unwrap();
+        let sni = conn.split(':').next().unwrap();
 
         if session.server_addr().unwrap().to_string().contains("7189") {
-            let mut peer = HttpPeer::new(format!("{}", conn), false, " ".to_string());
+            let port = conn.split(':').nth(1).unwrap_or("80").parse::<u16>().unwrap();
+            let mut peer = HttpPeer::new(format!("{}:{}", sni, port), false, "".to_string());
             Ok(Box::new(peer))
-        }
-        else{
-            let sni = conn.split(':').next().unwrap();
+        } else {
             let port = conn.split(':').nth(1).unwrap_or("443").parse::<u16>().unwrap();
-            let mut peer = HttpPeer::new(format!("{}:{}", conn, port), true, format!("{}", sni));
-            // let mut toot = PeerOptions::new();
-            // // toot.verify_cert = false;
-            // peer.options = toot;
+            let mut peer = HttpPeer::new(format!("{}:{}", sni, port), true, format!("{}", sni));
+            let mut toot = PeerOptions::new();
+            toot.verify_cert = false;
+            peer.options = toot;
 
             Ok(Box::new(peer))
         }
     }
-
     async fn upstream_request_filter(&self, session: &mut Session, upstream_request: &mut RequestHeader, ctx: &mut Self::CTX) -> Result<()> {
-        // logging the request headers
-        ctx.method = Some(upstream_request.method.to_string());
-        ctx.uri = Some(upstream_request.uri.to_string());
-        ctx.host = session.get_header("Host").map(|h| h.to_str().unwrap_or("").to_string());
-        ctx.client_ip = session.client_addr().map(|ip| ip.to_string());
-
-        let mut headers = HashMap::new();
-        for (keys, values) in upstream_request.headers.iter() {
-            if let Ok(v) = values.to_str() {
-                headers.insert(keys.to_string(), v.to_string());
+        // log::info!("upstream_request filter");
+        if !ctx.is_websocket {
+            ctx.method = upstream_request.method.to_string();
+            ctx.uri = upstream_request.uri.to_string();
+            let mut headers = HashMap::new();
+            for (keys, values) in upstream_request.headers.iter() {
+                if let Ok(v) = values.to_str() {
+                    headers.insert(keys.to_string(), v.to_string());
+                }
             }
+            ctx.request_headers = headers;
         }
-        ctx.request_headers = Some(headers);
+        ctx.upstream_server = session.get_header("Host").map(|h| h.to_str().unwrap_or("").to_string()).unwrap();
+        ctx.client_ip = session.client_addr().map(|ip| ip.to_string()).unwrap();
+        ctx.timestamp = chrono::Utc::now().format("%a, %d %b %Y %H:%M:%S GMT").to_string();
+
 
         // Can add custom headers to send to upstream server
         upstream_request.append_header("x-added-by-proxy", "secret-token")?;
         Ok(())
     }
-
-    async fn request_body_filter(&self, _session: &mut Session, body: &mut Option<Bytes>, end_of_stream: bool, ctx: &mut Self::CTX) -> Result<()> {
-        // logging the request body
-        if let Some(data) = body {
-            if let Ok(body) = str::from_utf8(data) {
-                println!("body: {}", body);
-                ctx.request_body.push_str(body);
-            } else {
-                println!("non ascii body: {:?}", data);
-                ctx.request_body.push_str(&format!("{:?}", data));
-            }
-        }
-
-        if end_of_stream {
-            if let Ok(json) = serde_json::to_string_pretty(ctx) {
-                println!("{}", json);
-                if let Some(sender) = LOGGER.get() {
-                    sender.try_send(json); // non-blocking
-                }
-            }
-            println!("end of request body");
-        }
-        Ok(())
-    }
-
     async fn response_filter(&self, _session: &mut Session, upstream_response: &mut ResponseHeader, ctx: &mut Self::CTX) -> Result<()> {
+        // log::info!("response_filter");
+        if let Some(header) = upstream_response.headers.get("upgrade") {
+            if header == "websocket" {
+                let mut windowbits: u8 = 12;
+                if let Some(headertwo) = upstream_response.headers.get("sec-websocket-extensions") {
+                    match headertwo.to_str() {
+                        Ok(s) => {
+                            for part in s.split(';') {
+                                let temp = part.trim();
+                                if temp.starts_with("server_max_window_bits=") {
+                                    if let Some(value) = temp.split("=").nth(1) {
+                                        windowbits = value.parse::<u8>().unwrap_or(12);
+                                    }
+                                }
+                                if temp.contains("deflate") {
+                                    ctx.deflating = true;
+                                }
+                            }
+                        }
+                        Err(_) => {}
+                    }
+                }
+                ctx.is_websocket = true;
+                ctx.websocket_upgrade_completed = false;
+                ctx.stocdecompressor = Some(Decompress::new_with_window_bits(false, windowbits));
+                ctx.ctosdecompressor = Some(Decompress::new_with_window_bits(false, windowbits));
+            }
+        }
+
         // logging the response headers
         ctx.response_status = Some(upstream_response.status.as_u16());
         let mut headers = HashMap::new();
@@ -106,50 +121,137 @@ impl ProxyHttp for MITM {
             }
         }
         ctx.response_headers = Some(headers);
+        if ctx.is_websocket && !ctx.websocket_upgrade_completed {
+            let http_log = HttpLog {
+                timestamp: ctx.timestamp.clone(),
+                client_ip: ctx.client_ip.clone(),
+                method: ctx.method.clone(),
+                uri: ctx.uri.clone(),
+                upstream_server: ctx.upstream_server.clone(),
+                request_headers: ctx.request_headers.clone(),
+                request_body: None,
+                response_status: ctx.response_status.clone(),
+                response_headers: ctx.response_headers.clone(),
+                response_body: ctx.response_body.clone(),
+            };
+            if let Some(sender) = LOGGER.get() {
+                let _ = sender.try_send(LogEvent::Http(http_log));
+            }
+            ctx.websocket_upgrade_completed = true;
+        }
+        Ok(())
+    }
 
+    async fn request_body_filter(&self, _session: &mut Session, body: &mut Option<Bytes>, end_of_stream: bool, ctx: &mut Self::CTX) -> Result<()> {
+        // log::info!("request_body_filter");
+        if let Some(data) = body {
+            if ctx.is_websocket {
+                // ctx.clear_http_fields();
+                if let Some(ref mut decompressor) = ctx.ctosdecompressor {
+                    if let Some(decoded) = decode_client_ws_frame(decompressor, data, ctx.deflating) {
+                        log::info!("Decoded message from client to server websocket is {}", decoded);
+                        if decoded != String::new() {
+                            let ws_log = WebSocketLog {
+                                timestamp: chrono::Utc::now().to_rfc3339(),
+                                dir: "ctos".into(), // or "stoc"
+                                ip: ctx.client_ip.clone(),
+                                // uri: ctx.uri.clone().unwrap_or(String::new()),
+                                msg: decoded,
+                            };
+                            if let Some(sender) = LOGGER.get() {
+                                let _ = sender.try_send(LogEvent::WebSocket(ws_log)); // non-blocking
+                            }
+                        }
+                    }
+                    else {
+                        log::warn!("failed to decode");
+                    }
+                }
+                else {
+                    log::warn!("cannot init a decompressor");
+                }
+            }
+            else {
+                if let Ok(readbody) = str::from_utf8(data) {
+                    let snippet = readbody.get(..50).unwrap_or(readbody);
+                    log::info!("body: \n{}", snippet);
+                    ctx.request_body.get_or_insert_with(String::new).push_str(readbody);
+                } else {
+                    let snippet = data.get(..100).unwrap_or(data);
+                    log::info!("body: \n{:?}", snippet);
+                    ctx.request_body.get_or_insert_with(String::new).push_str(&format!("{:?}", data));
+                }
 
-        let status = upstream_response.status;
-        let content_type = upstream_response
-            .headers
-            .get("content-type")
-            .and_then(|v| v.to_str().ok())
-            .unwrap_or("unknown");
-
-        println!("logging Status: {}, Content-Type: {}", status, content_type);
-
+                if end_of_stream {
+                    log::info!("end of request body");
+                }
+            }
+        }
         Ok(())
     }
 
 
     fn upstream_response_body_filter(&self, _session: &mut Session, body: &mut Option<Bytes>, end_of_stream: bool, ctx: &mut Self::CTX) {
-        // logging the response body
         if let Some(data) = body {
-            let is_gzip = match &ctx.response_headers {
-                Some(headers) => headers.get("content-encoding").map_or(false, |value| value == "gzip"),
-                None => false,
-            };
-            if is_gzip {
-                ctx.response_body.push_str("GZIP compressed body");
-            } else if let Ok(body) = str::from_utf8(data) {
-                println!("body: {}", body);
-                ctx.response_body.push_str(body);
-            } else {
-                println!("non ascii body: {:?}", data);
-                ctx.response_body.push_str(&format!("{:?}", data));
-            }
-        }
-
-        if end_of_stream {
-            if let Ok(json) = serde_json::to_string_pretty(ctx) {
-                println!("{}", json);
-                if let Some(sender) = LOGGER.get() {
-                    sender.try_send(json); // non-blocking
+            if ctx.is_websocket {
+                // ctx.clear_http_fields();
+                if let Some(ref mut decompressor) = ctx.stocdecompressor {
+                    if let Some(decoded) = decode_server_ws_frame(decompressor, &data, ctx.deflating) {
+                        log::info!("decoded message from server to client websocket is {}", decoded);
+                        if decoded != String::new() {
+                            let ws_log = WebSocketLog {
+                                timestamp: chrono::Utc::now().to_rfc3339(),
+                                dir: "stoc".into(), // or "stoc"
+                                ip: ctx.upstream_server.clone(),
+                                msg: decoded,
+                            };
+                            if let Some(sender) = LOGGER.get() {
+                                let _ = sender.try_send(LogEvent::WebSocket(ws_log));
+                            }
+                        }
+                    }
+                    else {
+                        log::warn!("failed to decode");
+                    }
+                }
+                else {
+                    log::warn!("cannot init a decompressor");
                 }
             }
-            println!("end of response body");
+            else {
+                if let Ok(readbody) = str::from_utf8(data) {
+                    let snippet = readbody.get(..50).unwrap_or(readbody);
+                    log::info!("body: \n{}", snippet);
+                    ctx.response_body.get_or_insert_with(String::new).push_str(readbody);
+                } else {
+                    let snippet = data.get(..50).unwrap_or(data);
+                    log::info!("body: \n{:?}", snippet);
+                    ctx.response_body.get_or_insert_with(String::new).push_str(&format!("{:?}", data));
+                }
+
+                if end_of_stream {
+                    let http_log = HttpLog {
+                        timestamp: ctx.timestamp.clone(),
+                        client_ip: ctx.client_ip.clone(),
+                        method: ctx.method.clone(),
+                        uri: ctx.uri.clone(),
+                        upstream_server: ctx.upstream_server.clone(),
+                        request_headers: ctx.request_headers.clone(),
+                        request_body: ctx.request_body.clone(),
+                        response_status: ctx.response_status.clone(),
+                        response_headers: ctx.response_headers.clone(),
+                        response_body: ctx.response_body.clone(),
+                    };
+                    if let Some(sender) = LOGGER.get() {
+                        let _ = sender.try_send(LogEvent::Http(http_log)); // non-blocking
+                    }
+                    log::info!("end of response body");
+                }
+            }
         }
     }
 }
+
 
 struct MyTlsHandler;
 
@@ -157,52 +259,77 @@ struct MyTlsHandler;
 impl TlsAccept for MyTlsHandler {
     async fn certificate_callback(&self, ssl: &mut TlsRef) {
         if let Some(sni) = ssl.servername(NameType::HOST_NAME) {
-            println!("SNI received is: {}", sni);
+            log::info!("SNI received is: {}", sni);
 
-            match fakegencert::generate_fake_cert(sni) {
+            match generate_fake_cert(sni) {
                 Ok(certkey) => {
                     if let Err(e) = ssl.set_certificate(&certkey.cert) {
-                        println!("error in setting certificate: {}", e);
+                        log::warn!("error in setting certificate: {}", e);
                         return;
                     }
 
                     if let Err(e) = ssl.set_private_key(&certkey.key) {
-                        println!("error in setting private key: {}", e);
+                        log::warn!("error in setting private key: {}", e);
                         return;
                     }
                 }
                 Err(e) => {
-                    println!("error generating fake cert for '{}': {}", sni, e);
+                    log::warn!("error generating fake cert for '{}': {}", sni, e);
                 }
             }
         }
     }
 }
 
+
+
+
 use tokio::runtime::Runtime;
+use once_cell::sync::OnceCell;
+use tokio::{sync::mpsc::Sender, fs::OpenOptions, io::AsyncWriteExt };
+
+static LOGGER: OnceCell<Sender<LogEvent>> = OnceCell::new();
+
+
 fn main() {
+    env_logger::init_from_env(env_logger::Env::new().default_filter_or("info"));
     let rt = Runtime::new().unwrap();
 
     rt.spawn(async {
-        let (tx, mut rx) = tokio::sync::mpsc::channel::<String>(1000);
+        let (tx, mut rx) = tokio::sync::mpsc::channel::<LogEvent>(1000);
         LOGGER.set(tx).unwrap();
 
-        let log_file_path = "/tmp/proxylog.json";
-        let mut file = OpenOptions::new()
+        let mut http_file = OpenOptions::new()
             .create(true)
             .append(true)
-            .open(log_file_path)
+            .open("/tmp/httplog.json")
             .await
             .expect("cannot open file");
 
-        while let Some(entry) = rx.recv().await {
-            if let Err(e) = file.write_all(entry.as_bytes()).await {
-                println!("error writing request: {}", e);
+        let mut ws_file = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open("/tmp/wslog.json")
+            .await
+            .expect("cannot open file");
+
+        while let Some(log) = rx.recv().await {
+            match log {
+                LogEvent::Http(http_log) => {
+                    if let Ok(json) = serde_json::to_string_pretty(&LogEvent::Http(http_log)) {
+                        let _ = http_file.write_all(json.as_bytes()).await;
+                        let _ = http_file.write_all(b"\n").await;
+                    }
+                }
+                LogEvent::WebSocket(ws_log) => {
+                    if let Ok(json) = serde_json::to_string_pretty(&LogEvent::WebSocket(ws_log)) {
+                        let _ = ws_file.write_all(json.as_bytes()).await;
+                        let _ = ws_file.write_all(b"\n").await;
+                    }
+                }
             }
-            let _ = file.write_all(b"\n").await;
         }
     });
-
 
     let mut server = Server::new(None).unwrap();
     server.bootstrap();
@@ -217,7 +344,7 @@ fn main() {
 
     proxy.add_tcp("0.0.0.0:7189");
     server.add_service(proxy);
-    println!("https Proxy listening on 0.0.0.0:6189");
-    println!("http proxy listening on 0.0.0.0:7189");
+    log::info!("https Proxy listening on 0.0.0.0:6189");
+    log::info!("http proxy listening on 0.0.0.0:7189");
     server.run_forever();
 }

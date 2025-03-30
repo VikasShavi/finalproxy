@@ -26,6 +26,13 @@ iptables -t nat -A OUTPUT -p tcp --dport 443 -m owner ! --uid-owner mitm -j REDI
 iptables -t nat -A OUTPUT -p tcp --dport 80 -m owner ! --uid-owner mitm -j REDIRECT --to-ports 7189
 ```
 
+## Generating own keys (valid for 1 year)
+```bash
+mkdir keys
+openssl genrsa -out keys/rootCA.key 2048
+openssl req -x509 -new -nodes -key keys/rootCA.key -sha256 -days 365 -out keys/rootCA.pem
+```
+
 ## Running the code
 ```bash
 cargo build --features server --bin server --release
@@ -33,14 +40,9 @@ sudo chown mitm:mitm keys/rootCA.*
 sudo -u mitm target/release/server
 ```
 
-
-## Optional - Generating own keys (valid for 1 year)
-```bash
-openssl genrsa -out rootCA.key 2048
-openssl req -x509 -new -nodes -key rootCA.key -sha256 -days 365 -out rootCA.pem
-```
-
 ## Example output of log files
+
+#### Http Log
 ```json
 {
   "client_ip": "192.168.1.25:53752",
@@ -78,5 +80,37 @@ openssl req -x509 -new -nodes -key rootCA.key -sha256 -days 365 -out rootCA.pem
     "cache-control": "no-cache"
   },
   "response_body": "GZIP compressed body"
+}
+```
+
+#### Websocket Log
+```json
+{
+  "log_type": "WebSocket",
+  "timestamp": "2025-03-30T07:32:52.506522981+00:00",
+  "dir": "ctos",
+  "ip": "127.0.0.1:35830",
+  "msg": "pwd"
+}
+{
+  "log_type": "WebSocket",
+  "timestamp": "2025-03-30T07:32:53.413686213+00:00",
+  "dir": "ctos",
+  "ip": "127.0.0.1:35830",
+  "msg": "sdkjjsdbh"
+}
+{
+  "log_type": "WebSocket",
+  "timestamp": "2025-03-30T07:32:54.203569803+00:00",
+  "dir": "ctos",
+  "ip": "127.0.0.1:35830",
+  "msg": "dvfdv"
+}
+{
+  "log_type": "WebSocket",
+  "timestamp": "2025-03-30T07:32:57.075556141+00:00",
+  "dir": "ctos",
+  "ip": "127.0.0.1:35830",
+  "msg": "dfvdfbfg shdfbjv8734838"
 }
 ```

@@ -15,9 +15,12 @@ tokio = { version = "1", features = ["full"], optional = true }
 bytes = { version = "1.8", optional = true }
 serde = { version = "1.0", features = ["derive"], optional = true }
 serde_json = { version = "1.0", optional = true }
-once_cell = { version = "1.19", optional = true }
+once_cell = { version = "1.21", optional = true }
 dashmap = { version = "6.1", optional = true }
-anyhow = {  version = "1.0.97", optional = true }
+env_logger = "0.11.3"
+log = "0.4.21"
+chrono = { version = "0.4.40", optional = true }
+flate2 = { version = "1.1.0",features = ["any_zlib", "libz-sys"], optional = true }
 
 [patch.crates-io]
 pingora-core = { path = "./pingora/pingora-core" }
@@ -27,8 +30,8 @@ pingora-proxy = { path = "./pingora/pingora-proxy" }
 pingora-openssl = { path = "./pingora/pingora-openssl" }
 
 [features]
-server = ["pingora-http", "pingora-core", "pingora-proxy", "pingora-openssl", "pingora-error", "async-trait", "bytes", "serde", "serde_json", "once_cell", "dashmap", "openssl", "tokio", "anyhow"]
-forwarder = ["tokio", "anyhow"]
+server = ["pingora-http", "pingora-core", "pingora-proxy", "pingora-openssl", "pingora-error", "async-trait", "bytes", "serde", "serde_json", "once_cell", "dashmap", "openssl", "tokio", "chrono", "flate2"]
+forwarder = ["tokio"]
 
 [[bin]]
 name = "server"
