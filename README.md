@@ -17,6 +17,11 @@ sfv = "0"
 sfv = "0.10.4"
 ```
 
+## Compile the code
+```bash
+cargo build --features server --bin server --release
+```
+
 ## Routing setup
 ```bash
 sudo useradd --system --no-create-home mitm
@@ -35,7 +40,6 @@ openssl req -x509 -new -nodes -key keys/rootCA.key -sha256 -days 365 -out keys/r
 
 ## Running the code
 ```bash
-cargo build --features server --bin server --release
 sudo chown mitm:mitm keys/rootCA.*
 sudo -u mitm target/release/server
 ```
