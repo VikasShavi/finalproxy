@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+pingora = { version = "0.4.0", optional = true }
 pingora-http = { version = "0.4", optional = true }
 pingora-core = { version = "0.4", features = ["openssl"], optional = true }
 pingora-proxy = { version = "0.4", optional = true }
@@ -21,8 +22,11 @@ env_logger = "0.11.3"
 log = "0.4.21"
 chrono = { version = "0.4.40", optional = true }
 flate2 = { version = "1.1.0",features = ["any_zlib", "libz-sys"], optional = true }
+uuid = { version = "1.16.0", features = ["v4"], optional = true }
+socket2 = { version =  "0.5.9", features = ["all"] ,optional = true }
 
 [patch.crates-io]
+pingora = { path = "./pingora/pingora" }
 pingora-core = { path = "./pingora/pingora-core" }
 pingora-http = { path = "./pingora/pingora-http" }
 pingora-cache = { path = "./pingora/pingora-cache" }
@@ -30,7 +34,7 @@ pingora-proxy = { path = "./pingora/pingora-proxy" }
 pingora-openssl = { path = "./pingora/pingora-openssl" }
 
 [features]
-server = ["pingora-http", "pingora-core", "pingora-proxy", "pingora-openssl", "pingora-error", "async-trait", "bytes", "serde", "serde_json", "once_cell", "dashmap", "openssl", "tokio", "chrono", "flate2"]
+server = ["uuid", "socket2", "pingora" ,"pingora-http", "pingora-core", "pingora-proxy", "pingora-openssl", "pingora-error", "async-trait", "bytes", "serde", "serde_json", "once_cell", "dashmap", "openssl", "tokio", "chrono", "flate2"]
 forwarder = ["tokio"]
 
 [[bin]]

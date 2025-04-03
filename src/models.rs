@@ -14,8 +14,9 @@ pub enum LogEvent {
 pub struct WebSocketLog {
     pub timestamp: String,
     pub dir: String,
-    pub ip: String, // from ctx.client_ip
-    // pub uri: String,     // from ctx.uri
+    pub from_ip: String, // from ctx.client_ip
+    pub uri: String,     // from ctx.uri
+    pub websocket_session_id: String,
     pub msg: String,
 }
 
@@ -50,6 +51,7 @@ pub struct HttpLog {
 pub struct RequestResponseLogging {
     pub is_websocket: bool,
     pub websocket_upgrade_completed: bool,
+    pub websocket_session_id: String,
     pub ctosdecompressor: Option<Decompress>,
     pub stocdecompressor: Option<Decompress>,
     pub deflating: bool,

@@ -1,4 +1,5 @@
 use flate2::Decompress;
+use uuid::Uuid;
 
 use pingora_proxy::{http_proxy_service, ProxyHttp, Session};
 use pingora_core::upstreams::peer::{ HttpPeer, PeerOptions };
@@ -31,6 +32,9 @@ use ctosdecoder::decode_client_ws_frame;
 
 mod fakegencert;
 use fakegencert::generate_fake_cert;
+
+mod tcpproxy;
+use tcpproxy::proxy_service;
 
 struct MITM;
 
@@ -107,6 +111,7 @@ impl ProxyHttp for MITM {
                 }
                 ctx.is_websocket = true;
                 ctx.websocket_upgrade_completed = false;
+                ctx.websocket_session_id = Uuid::new_v4().to_string();
                 ctx.stocdecompressor = Some(Decompress::new_with_window_bits(false, windowbits));
                 ctx.ctosdecompressor = Some(Decompress::new_with_window_bits(false, windowbits));
             }
@@ -154,8 +159,9 @@ impl ProxyHttp for MITM {
                             let ws_log = WebSocketLog {
                                 timestamp: chrono::Utc::now().to_rfc3339(),
                                 dir: "ctos".into(), // or "stoc"
-                                ip: ctx.client_ip.clone(),
-                                // uri: ctx.uri.clone().unwrap_or(String::new()),
+                                from_ip: ctx.client_ip.clone(),
+                                uri: ctx.uri.clone(),
+                                websocket_session_id: ctx.websocket_session_id.clone(),
                                 msg: decoded,
                             };
                             if let Some(sender) = LOGGER.get() {
@@ -178,7 +184,7 @@ impl ProxyHttp for MITM {
                     ctx.request_body.get_or_insert_with(String::new).push_str(readbody);
                 } else {
                     let snippet = data.get(..100).unwrap_or(data);
-                    log::info!("body: \n{:?}", snippet);
+                    // log::info!("body: \n{:?}", snippet);
                     ctx.request_body.get_or_insert_with(String::new).push_str(&format!("{:?}", data));
                 }
 
@@ -192,6 +198,33 @@ impl ProxyHttp for MITM {
 
 
     fn upstream_response_body_filter(&self, _session: &mut Session, body: &mut Option<Bytes>, end_of_stream: bool, ctx: &mut Self::CTX) {
+        // Check if there's a Content-Type header in the response headers.
+        if let Some(ref headers) = ctx.response_headers {
+            if let Some(content_type) = headers.get("content-type") {
+                if is_media_content(content_type) {
+                    log::info!("not logged because it is {} file", content_type);
+                    if end_of_stream {
+                        let http_log = HttpLog {
+                            timestamp: ctx.timestamp.clone(),
+                            client_ip: ctx.client_ip.clone(),
+                            method: ctx.method.clone(),
+                            uri: ctx.uri.clone(),
+                            upstream_server: ctx.upstream_server.clone(),
+                            request_headers: ctx.request_headers.clone(),
+                            request_body: ctx.request_body.clone(),
+                            response_status: ctx.response_status.clone(),
+                            response_headers: ctx.response_headers.clone(),
+                            response_body: Some(format!("not logged because it is {} file", content_type)),
+                        };
+                        if let Some(sender) = LOGGER.get() {
+                            let _ = sender.try_send(LogEvent::Http(http_log));
+                        }
+                        log::info!("end of response body");
+                    }
+                    return;
+                }
+            }
+        }
         if let Some(data) = body {
             if ctx.is_websocket {
                 // ctx.clear_http_fields();
@@ -202,8 +235,10 @@ impl ProxyHttp for MITM {
                             let ws_log = WebSocketLog {
                                 timestamp: chrono::Utc::now().to_rfc3339(),
                                 dir: "stoc".into(), // or "stoc"
-                                ip: ctx.upstream_server.clone(),
+                                from_ip: ctx.upstream_server.clone(),
+                                uri: ctx.uri.clone(),
                                 msg: decoded,
+                                websocket_session_id: ctx.websocket_session_id.clone(),
                             };
                             if let Some(sender) = LOGGER.get() {
                                 let _ = sender.try_send(LogEvent::WebSocket(ws_log));
@@ -225,7 +260,7 @@ impl ProxyHttp for MITM {
                     ctx.response_body.get_or_insert_with(String::new).push_str(readbody);
                 } else {
                     let snippet = data.get(..50).unwrap_or(data);
-                    log::info!("body: \n{:?}", snippet);
+                    // log::info!("body: \n{:?}", snippet);
                     ctx.response_body.get_or_insert_with(String::new).push_str(&format!("{:?}", data));
                 }
 
@@ -252,6 +287,10 @@ impl ProxyHttp for MITM {
     }
 }
 
+fn is_media_content(content_type: &str) -> bool {
+    let ct = content_type.to_lowercase();
+    ct.starts_with("image/") || ct.starts_with("video/") || ct.starts_with("audio/") || ct.contains("font") || ct.contains("css")
+}
 
 struct MyTlsHandler;
 
@@ -344,9 +383,13 @@ fn main() {
 
     let mut proxyhttp = http_proxy_service(&server.configuration, MITM);
     proxyhttp.add_tcp("0.0.0.0:7189");
-    server.add_services(vec![Box::new(proxyhttp), Box::new(proxyhttps)]);
+
+    let tcp_proxy = proxy_service("0.0.0.0:8189");
+
+    server.add_services(vec![Box::new(proxyhttp), Box::new(proxyhttps), Box::new(tcp_proxy)]);
     log::info!("https Proxy listening on 0.0.0.0:6189");
     log::info!("http proxy listening on 0.0.0.0:7189");
+    log::info!("tcp Proxy listening on 0.0.0.0:8189");
 
     server.run_forever();
 }
